@@ -209,7 +209,7 @@ std::vector<hardware_interface::StateInterface> ODriveHardwareInterface::export_
         ));
         state_interfaces.emplace_back(hardware_interface::StateInterface(
             info_.joints[i].name,
-            "enable_pin_state",
+            "enable_pin_state/bool",
             &axes_[i].enable_pin_state_
         ));
     }
