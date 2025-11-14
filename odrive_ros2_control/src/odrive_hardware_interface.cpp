@@ -78,7 +78,7 @@ struct Axis {
     // uint32_t disarm_reason_ = 0;
     // double fet_temperature_ = NAN;
     // double motor_temperature_ = NAN;
-    // double bus_voltage_ = NAN;
+    double bus_voltage_ = NAN;
     // double bus_current_ = NAN;
 
     // Indicates which controller inputs are enabled. This is configured by the
@@ -211,6 +211,11 @@ std::vector<hardware_interface::StateInterface> ODriveHardwareInterface::export_
             info_.joints[i].name,
             "enable_pin_state/bool",
             &axes_[i].enable_pin_state_
+        ));
+state_interfaces.emplace_back(hardware_interface::StateInterface(
+            info_.joints[i].name,
+            "bus_voltage/voltage",
+            &axes_[i].bus_voltage_
         ));
     }
 
@@ -397,6 +402,11 @@ void Axis::on_can_msg(const rclcpp::Time&, const can_frame& frame) {
             if (Get_Torques_msg_t msg; try_decode(msg)) {
                 torque_target_ = msg.Torque_Target;
                 torque_estimate_ = msg.Torque_Estimate;
+            }
+        } break;
+case Get_Bus_Voltage_Current_msg_t::cmd_id: {
+            if (Get_Bus_Voltage_Current_msg_t msg; try_decode(msg)) {
+                bus_voltage_ = msg.Bus_Voltage;
             }
         } break;
         case 0x05: { // TxSdo - SDO response
