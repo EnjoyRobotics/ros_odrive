@@ -212,7 +212,7 @@ std::vector<hardware_interface::StateInterface> ODriveHardwareInterface::export_
             "enable_pin_state/bool",
             &axes_[i].enable_pin_state_
         ));
-state_interfaces.emplace_back(hardware_interface::StateInterface(
+        state_interfaces.emplace_back(hardware_interface::StateInterface(
             info_.joints[i].name,
             "bus_voltage/voltage",
             &axes_[i].bus_voltage_
@@ -404,7 +404,7 @@ void Axis::on_can_msg(const rclcpp::Time&, const can_frame& frame) {
                 torque_estimate_ = msg.Torque_Estimate;
             }
         } break;
-case Get_Bus_Voltage_Current_msg_t::cmd_id: {
+        case Get_Bus_Voltage_Current_msg_t::cmd_id: {
             if (Get_Bus_Voltage_Current_msg_t msg; try_decode(msg)) {
                 bus_voltage_ = msg.Bus_Voltage;
             }
@@ -420,9 +420,9 @@ case Get_Bus_Voltage_Current_msg_t::cmd_id: {
                     bool enable_pin_value = frame.data[4] != 0;
                     enable_pin_state_ = enable_pin_value ? 1.0 : 0.0;
 
-                    RCLCPP_INFO(rclcpp::get_logger("ODriveHardwareInterface"),
-                        "Enable pin state updated: node_id=%d, value=%s (%.1f)",
-                        node_id_, enable_pin_value ? "true" : "false", enable_pin_state_);
+                    // RCLCPP_INFO(rclcpp::get_logger("ODriveHardwareInterface"),
+                    //     "Enable pin state updated: node_id=%d, value=%s (%.1f)",
+                    //     node_id_, enable_pin_value ? "true" : "false", enable_pin_state_);
                 }
             }
         } break;
