@@ -7,6 +7,7 @@
 #include "pluginlib/class_list_macros.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "socket_can.hpp"
+#include <chrono>
 
 namespace odrive_ros2_control {
 
@@ -77,7 +78,7 @@ struct Axis {
     // uint32_t disarm_reason_ = 0;
     // double fet_temperature_ = NAN;
     // double motor_temperature_ = NAN;
-    // double bus_voltage_ = NAN;
+    double bus_voltage_ = NAN;
     // double bus_current_ = NAN;
 
     // Indicates which controller inputs are enabled. This is configured by the
@@ -88,6 +89,29 @@ struct Axis {
     bool pos_input_enabled_ = false;
     bool vel_input_enabled_ = false;
     bool torque_input_enabled_ = false;
+
+    // GPIO enable pin state - represents whether the axis enable pin is active
+    double enable_pin_state_ = 0.0; // 0.0 = disabled, 1.0 = enabled
+
+    // SDO support for reading enable pin state
+    static constexpr uint16_t ENABLE_PIN_STATE_ENDPOINT_ID = 417;
+    std::chrono::steady_clock::time_point last_enable_pin_read_time_;
+
+    void request_enable_pin_state() {
+        // Send SDO read request for axis0.enable_pin.state (endpoint ID 417)
+        // See flat_endpoints.json (S1, 0.6.11-1) https://docs.odriverobotics.com/releases/firmware
+        struct can_frame frame;
+        frame.can_id = node_id_ << 5 | 0x04; // 0x04: RxSdo
+        frame.can_dlc = 4;
+
+        // Pack: opcode (1 byte), endpoint_id (2 bytes), reserved (1 byte)
+        frame.data[0] = 0x00; // OPCODE_READ
+        frame.data[1] = ENABLE_PIN_STATE_ENDPOINT_ID & 0xFF;        // endpoint_id low byte
+        frame.data[2] = (ENABLE_PIN_STATE_ENDPOINT_ID >> 8) & 0xFF; // endpoint_id high byte
+        frame.data[3] = 0x00; // reserved
+
+        can_intf_->send_can_frame(frame);
+    }
 
     template <typename T>
     void send(const T& msg) const {
@@ -183,6 +207,16 @@ std::vector<hardware_interface::StateInterface> ODriveHardwareInterface::export_
             hardware_interface::HW_IF_POSITION,
             &axes_[i].pos_estimate_
         ));
+        state_interfaces.emplace_back(hardware_interface::StateInterface(
+            info_.joints[i].name,
+            "enable_pin_state/bool",
+            &axes_[i].enable_pin_state_
+        ));
+        state_interfaces.emplace_back(hardware_interface::StateInterface(
+            info_.joints[i].name,
+            "bus_voltage/voltage",
+            &axes_[i].bus_voltage_
+        ));
     }
 
     return state_interfaces;
@@ -253,6 +287,18 @@ return_type ODriveHardwareInterface::perform_command_mode_switch(
 
 return_type ODriveHardwareInterface::read(const rclcpp::Time& timestamp, const rclcpp::Duration&) {
     timestamp_ = timestamp;
+
+    // Request enable pin state periodically (10Hz)
+    auto now = std::chrono::steady_clock::now();
+    for (auto& axis : axes_) {
+        auto time_since_last_read = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - axis.last_enable_pin_read_time_).count();
+
+        if (time_since_last_read > 100 || axis.last_enable_pin_read_time_.time_since_epoch().count() == 0) {
+            axis.request_enable_pin_state();
+            axis.last_enable_pin_read_time_ = now;
+        }
+    }
 
     while (can_intf_.read_nonblocking()) {
         // repeat until CAN interface has no more messages
@@ -356,6 +402,28 @@ void Axis::on_can_msg(const rclcpp::Time&, const can_frame& frame) {
             if (Get_Torques_msg_t msg; try_decode(msg)) {
                 torque_target_ = msg.Torque_Target;
                 torque_estimate_ = msg.Torque_Estimate;
+            }
+        } break;
+        case Get_Bus_Voltage_Current_msg_t::cmd_id: {
+            if (Get_Bus_Voltage_Current_msg_t msg; try_decode(msg)) {
+                bus_voltage_ = msg.Bus_Voltage;
+            }
+        } break;
+        case 0x05: { // TxSdo - SDO response
+            if (frame.can_dlc >= 4) {
+                // Parse SDO response: opcode (1), endpoint_id (2), reserved (1), data...
+                uint8_t opcode = frame.data[0];
+                uint16_t endpoint_id = frame.data[1] | (frame.data[2] << 8);
+
+                if (opcode == 0x00 && endpoint_id == ENABLE_PIN_STATE_ENDPOINT_ID && frame.can_dlc >= 5) {
+                    // Extract boolean value from response
+                    bool enable_pin_value = frame.data[4] != 0;
+                    enable_pin_state_ = enable_pin_value ? 1.0 : 0.0;
+
+                    // RCLCPP_INFO(rclcpp::get_logger("ODriveHardwareInterface"),
+                    //     "Enable pin state updated: node_id=%d, value=%s (%.1f)",
+                    //     node_id_, enable_pin_value ? "true" : "false", enable_pin_state_);
+                }
             }
         } break;
             // silently ignore unimplemented command IDs
