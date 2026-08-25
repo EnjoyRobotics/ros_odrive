@@ -8,8 +8,34 @@
 #include "rclcpp/rclcpp.hpp"
 #include "socket_can.hpp"
 #include <chrono>
+#include <unordered_map>
 
 namespace odrive_ros2_control {
+
+const std::unordered_map<uint32_t, std::string> ODRIVE_ERROR_MAP = {
+    {ODRIVE_ERROR_NONE, "OK"},
+    {ODRIVE_ERROR_INITIALIZING, "Initializing"},
+    {ODRIVE_ERROR_SYSTEM_LEVEL, "System Level Error"},
+    {ODRIVE_ERROR_TIMING_ERROR, "Timing Error"},
+    {ODRIVE_ERROR_MISSING_ESTIMATE, "Missing Estimate"},
+    {ODRIVE_ERROR_BAD_CONFIG, "Bad Config"},
+    {ODRIVE_ERROR_DRV_FAULT, "DRV Fault"},
+    {ODRIVE_ERROR_MISSING_INPUT, "Missing Input"},
+    {ODRIVE_ERROR_DC_BUS_OVER_VOLTAGE, "DC Bus Over Voltage"},
+    {ODRIVE_ERROR_DC_BUS_UNDER_VOLTAGE, "DC Bus Under Voltage"},
+    {ODRIVE_ERROR_DC_BUS_OVER_CURRENT, "DC Bus Over Current"},
+    {ODRIVE_ERROR_DC_BUS_OVER_REGEN_CURRENT, "DC Bus Over Regen Current"},
+    {ODRIVE_ERROR_CURRENT_LIMIT_VIOLATION, "Current Limit Violation"},
+    {ODRIVE_ERROR_MOTOR_OVER_TEMP, "Motor Over Temperature"},
+    {ODRIVE_ERROR_INVERTER_OVER_TEMP, "Inverter Over Temperature"},
+    {ODRIVE_ERROR_VELOCITY_LIMIT_VIOLATION, "Velocity Limit Violation"},
+    {ODRIVE_ERROR_POSITION_LIMIT_VIOLATION, "Position Limit Violation"},
+    {ODRIVE_ERROR_WATCHDOG_TIMER_EXPIRED, "Watchdog Timer Expired"},
+    {ODRIVE_ERROR_ESTOP_REQUESTED, "E-Stop Requested"},
+    {ODRIVE_ERROR_SPINOUT_DETECTED, "Spinout Detected"},
+    {ODRIVE_ERROR_BRAKE_RESISTOR_DISARMED, "Brake Resistor Disarmed"},
+    {ODRIVE_ERROR_THERMISTOR_DISCONNECTED, "Thermistor Disconnected"},
+    {ODRIVE_ERROR_CALIBRATION_ERROR, "Calibration Error"}};
 
 class Axis;
 
@@ -64,7 +90,7 @@ struct Axis {
 
     // State (ODrives => ros2_control)
     // rclcpp::Time encoder_estimates_timestamp_;
-    // uint32_t axis_error_ = 0;
+    uint32_t error_ = 0;
     // uint8_t axis_state_ = 0;
     // uint8_t procedure_result_ = 0;
     // uint8_t trajectory_done_flag_ = 0;
@@ -392,6 +418,27 @@ void Axis::on_can_msg(const rclcpp::Time&, const can_frame& frame) {
     };
 
     switch (cmd) {
+        case Get_Error_msg_t::cmd_id: {
+            if (Get_Error_msg_t msg; try_decode(msg)) {
+                if (msg.Active_Errors != error_) {
+                    error_ = msg.Active_Errors;
+                    if (error_ != ODRIVE_ERROR_NONE) {
+                        std::string error_str = "";
+                        for (auto const& [error_code, error_name] : ODRIVE_ERROR_MAP) {
+                            if (error_ & error_code) {
+                                error_str += error_name + " ";
+                            }
+                        }
+
+                        RCLCPP_ERROR(
+                            rclcpp::get_logger("ODriveHardwareInterface"),
+                            "Axis %d error: %s(0x%08X)",
+                            node_id_, error_str.c_str(), error_
+                        );
+                    }
+                }
+            }
+        } break;
         case Get_Encoder_Estimates_msg_t::cmd_id: {
             if (Get_Encoder_Estimates_msg_t msg; try_decode(msg)) {
                 pos_estimate_ = msg.Pos_Estimate * (2 * M_PI);
